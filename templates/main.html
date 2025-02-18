@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Segmentation Path Finder</title>
+  <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.6.2/css/bootstrap.min.css">
+  <script src="https://cesium.com/downloads/cesiumjs/releases/1.100/Build/Cesium/Cesium.js"></script>
+  <link href="https://cesium.com/downloads/cesiumjs/releases/1.100/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
+  
+  <style>
+    html, body {
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+    }
+    #navbar {
+      background: #343a40;
+      color: white;
+      padding: 8px 15px;
+      position: fixed;
+      width: 100%;
+      z-index: 110;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    #navbar h1 {
+      font-size: 20px;
+      margin: 0;
+    }
+    #controls {
+      position: absolute;
+      top: 50px;
+      left: 10px;
+      right: 10px;
+      z-index: 105;
+      display: flex;
+      gap: 10px;
+    }
+    #cesiumContainer {
+      position: absolute;
+      top: 40px;
+      bottom: 0;
+      left: 0;
+      right: 0;
+    }
+    #loading {
+      display: none;
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0, 0, 0, 0.5);
+      z-index: 200;
+      color: #fff;
+      font-size: 24px;
+      text-align: center;
+      padding-top: 20%;
+    }
+  </style>
+</head>
+<body>
+
+  <div id="navbar">
+    <h1>Segmentation Path Finder</h1>
+  </div>
+
+  <div id="controls" class="container">
+    <button id="captureBtn" class="btn btn-primary">Capture View</button>
+  </div>
+
+  <div id="cesiumContainer"></div>
+  <div id="loading">Processing...</div>
+
+  <script>
+    Cesium.Ion.defaultAccessToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiI1YWQzMDE3YS1kMzY1LTQ3ZTktYjRhMy03YjhiZTUwZTM2YzYiLCJpZCI6Mjc2NTkwLCJpYXQiOjE3Mzk3NzY2NzJ9.9l8emeZivVd-0L-U1hqQYdbGhPT2zuEAbUfnSgWyE_o';
+    var viewer = new Cesium.Viewer('cesiumContainer', {
+        terrainProvider: Cesium.createWorldTerrain(),
+        geocoder: true
+    });
+    viewer.camera.setView({
+        destination: Cesium.Cartesian3.fromDegrees(-75.59777, 40.03883, 15000000.0)
+    });
+    document.querySelector(".cesium-viewer-geocoderContainer").style.zIndex = "120";
+
+    // Function to capture the image
+    function captureImage() {
+        viewer.scene.render();  // Make sure to render the scene before capturing
+        return viewer.canvas.toDataURL("image/jpeg");
+    }
+
+    document.getElementById("captureBtn").addEventListener("click", function() {
+        var imageData = captureImage();  // Capture image on button click
+        var imgWindow = window.open("", "Select Points", "width=800,height=600");
+        imgWindow.document.write("<html><head><title>Select Points</title>");
+        imgWindow.document.write("<link rel='stylesheet' href='https://maxcdn.bootstrapcdn.com/bootstrap/4.6.2/css/bootstrap.min.css'>");
+        imgWindow.document.write("</head><body class='p-3'>");
+        imgWindow.document.write("<img id='capturedImage' src='" + imageData + "' class='img-fluid'/>");
+        imgWindow.document.write("<p class='mt-3'>Click two points on the image: First is Start, Second is Goal.</p>");
+        imgWindow.document.write("<div id='feedback' style='color: red;'></div>");
+        imgWindow.document.write("<script>" +
+            "var points = [];" +
+            "var feedbackDiv = document.getElementById('feedback');" +
+            "var img = document.getElementById('capturedImage');" +
+            "img.style.position = 'relative';" +
+            "img.addEventListener('click', function(e) {" +
+                "var rect = img.getBoundingClientRect();" +
+                "var x = e.clientX - rect.left;" +  // Correct the x coordinate
+                "var y = e.clientY - rect.top;" +   // Correct the y coordinate
+                "points.push([Math.round(y), Math.round(x)]);" +  // Store points in order
+                "var marker = document.createElement('div');" +
+                "marker.style.position = 'absolute';" +
+                "marker.style.width = '10px';" +
+                "marker.style.height = '10px';" +
+                "marker.style.borderRadius = '50%';" +
+                "marker.style.backgroundColor = points.length === 1 ? 'blue' : 'green';" +
+                "marker.style.top = (y - 5) + 'px';" +
+                "marker.style.left = (x - 5) + 'px';" +
+                "img.parentElement.appendChild(marker);" +
+                "feedbackDiv.innerHTML = points.length === 1 ? 'Start Point Selected. Now click to select Goal.' : 'Goal Point Selected. Click to finalize.';" +
+                "if (points.length === 2) {" +
+                    "window.opener.postMessage({image: '" + imageData + "', start: points[0], goal: points[1]}, '*');" +
+                    "alert('Points selected.');" +
+                    "window.close();" +
+                "}" +
+            "});" +
+            "<\/script>");
+        imgWindow.document.write("</body></html>");
+    });
+
+    window.addEventListener("message", function(event) {
+        var data = event.data;
+        if(data.image && data.start && data.goal) {
+            document.getElementById("loading").style.display = "flex";
+            fetch("/process", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    image: data.image,
+                    start: data.start,
+                    goal: data.goal
+                })
+            })
+            .then(response => response.json())
+            .then(result => {
+                document.getElementById("loading").style.display = "none";
+                var resultWindow = window.open("", "Optimal Path", "width=800,height=600");
+                resultWindow.document.write("<html><head><title>Optimal Path</title>");
+                resultWindow.document.write("<link rel='stylesheet' href='https://maxcdn.bootstrapcdn.com/bootstrap/4.6.2/css/bootstrap.min.css'>");
+                resultWindow.document.write("</head><body class='p-3'>");
+                resultWindow.document.write("<h2>Total Cost: " + result.cost.toFixed(2) + "</h2>");
+                resultWindow.document.write("<img src='data:image/jpeg;base64," + result.result + "' class='img-fluid'/>");
+                resultWindow.document.write("</body></html>");
+            });
+        }
+    });
+</script>
+
+
+
+</body>
+</html>
