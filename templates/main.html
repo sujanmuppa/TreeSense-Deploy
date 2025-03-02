@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.6.2/css/bootstrap.min.css">
   <script src="https://cesium.com/downloads/cesiumjs/releases/1.100/Build/Cesium/Cesium.js"></script>
   <link href="https://cesium.com/downloads/cesiumjs/releases/1.100/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
-  
+
   <style>
     html, body {
       height: 100%;
@@ -35,7 +35,7 @@
       top: 50px;
       left: 10px;
       right: 10px;
-      z-index: 105;
+      z-index: 120;
       display: flex;
       gap: 10px;
     }
@@ -57,22 +57,43 @@
       text-align: center;
       padding-top: 20%;
     }
+    #land-cover-stats {
+      display: none;
+      position: absolute;
+      bottom: 10px;
+      left: 10px;
+      background: white;
+      padding: 10px;
+      border-radius: 5px;
+      box-shadow: 0px 0px 10px rgba(0, 0, 0, 0.2);
+      font-size: 16px;
+      transition: opacity 1s ease-in-out;
+    }
+    .fade-out {
+      opacity: 0;
+    }
   </style>
 </head>
 <body>
-
   <div id="navbar">
     <h1>Segmentation Path Finder</h1>
   </div>
-
   <div id="controls" class="container">
     <button id="captureBtn" class="btn btn-primary">Capture View</button>
   </div>
-
   <div id="cesiumContainer"></div>
   <div id="loading">Processing...</div>
+  <div id="land-cover-stats">
+    <h4>Land Type Percentages</h4>
+    <p>Forest: <span id="forest-percent">--</span>%</p>
+    <p>Water: <span id="water-percent">--</span>%</p>
+    <p>Agriculture: <span id="agriculture-percent">--</span>%</p>
+    <p>Urban: <span id="urban-percent">--</span>%</p>
+    <p>Barren Land: <span id="barren-percent">--</span>%</p>
+  </div>
 
   <script>
+    // ✅ Initialize Cesium
     Cesium.Ion.defaultAccessToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiI1YWQzMDE3YS1kMzY1LTQ3ZTktYjRhMy03YjhiZTUwZTM2YzYiLCJpZCI6Mjc2NTkwLCJpYXQiOjE3Mzk3NzY2NzJ9.9l8emeZivVd-0L-U1hqQYdbGhPT2zuEAbUfnSgWyE_o';
     var viewer = new Cesium.Viewer('cesiumContainer', {
         terrainProvider: Cesium.createWorldTerrain(),
@@ -81,82 +102,219 @@
     viewer.camera.setView({
         destination: Cesium.Cartesian3.fromDegrees(-75.59777, 40.03883, 15000000.0)
     });
-    document.querySelector(".cesium-viewer-geocoderContainer").style.zIndex = "120";
 
-    // Function to capture the image
+    // ✅ Capture Image from Cesium
     function captureImage() {
-        viewer.scene.render();  // Make sure to render the scene before capturing
+        viewer.scene.render();
         return viewer.canvas.toDataURL("image/jpeg");
     }
 
+    // ✅ Open Processing Options Popup
     document.getElementById("captureBtn").addEventListener("click", function() {
-        var imageData = captureImage();  // Capture image on button click
-        var imgWindow = window.open("", "Select Points", "width=800,height=600");
-        imgWindow.document.write("<html><head><title>Select Points</title>");
-        imgWindow.document.write("<link rel='stylesheet' href='https://maxcdn.bootstrapcdn.com/bootstrap/4.6.2/css/bootstrap.min.css'>");
-        imgWindow.document.write("</head><body class='p-3'>");
-        imgWindow.document.write("<img id='capturedImage' src='" + imageData + "' class='img-fluid'/>");
-        imgWindow.document.write("<p class='mt-3'>Click two points on the image: First is Start, Second is Goal.</p>");
-        imgWindow.document.write("<div id='feedback' style='color: red;'></div>");
-        imgWindow.document.write("<script>" +
-            "var points = [];" +
-            "var feedbackDiv = document.getElementById('feedback');" +
-            "var img = document.getElementById('capturedImage');" +
-            "img.style.position = 'relative';" +
-            "img.addEventListener('click', function(e) {" +
-                "var rect = img.getBoundingClientRect();" +
-                "var x = e.clientX - rect.left;" +  // Correct the x coordinate
-                "var y = e.clientY - rect.top;" +   // Correct the y coordinate
-                "points.push([Math.round(y), Math.round(x)]);" +  // Store points in order
-                "var marker = document.createElement('div');" +
-                "marker.style.position = 'absolute';" +
-                "marker.style.width = '10px';" +
-                "marker.style.height = '10px';" +
-                "marker.style.borderRadius = '50%';" +
-                "marker.style.backgroundColor = points.length === 1 ? 'blue' : 'green';" +
-                "marker.style.top = (y - 5) + 'px';" +
-                "marker.style.left = (x - 5) + 'px';" +
-                "img.parentElement.appendChild(marker);" +
-                "feedbackDiv.innerHTML = points.length === 1 ? 'Start Point Selected. Now click to select Goal.' : 'Goal Point Selected. Click to finalize.';" +
-                "if (points.length === 2) {" +
-                    "window.opener.postMessage({image: '" + imageData + "', start: points[0], goal: points[1]}, '*');" +
-                    "alert('Points selected.');" +
-                    "window.close();" +
-                "}" +
-            "});" +
-            "<\/script>");
-        imgWindow.document.write("</body></html>");
+        var imageData = captureImage();
+        var popup = window.open("", "Image Options", "width=800,height=600");
+        popup.document.write(`
+            <html>
+            <head>
+                <title>Choose Action</title>
+                <link rel='stylesheet' href='https://maxcdn.bootstrapcdn.com/bootstrap/4.6.2/css/bootstrap.min.css'>
+                <style>
+                    .marker {
+                        position: absolute;
+                        width: 10px;
+                        height: 10px;
+                        background: red;
+                        border-radius: 50%;
+                        pointer-events: none;
+                    }
+                </style>
+            </head>
+            <body class='p-3'>
+                <h4>Select an Option</h4>
+                <div style="position: relative; display: inline-block;">
+                    <img id='capturedImage' src='${imageData}' class='img-fluid' style='position: relative;'/>
+                </div>
+                <div class='mt-3'>
+                    <button class='btn btn-primary' onclick='selectPath()'>Optimal Path</button>
+                    <button class='btn btn-success' onclick='processImage("segmented_image")'>Segmented Image</button>
+                    <button class='btn btn-info' onclick='processImage("land_cover")'>Land Cover</button>
+                    <button class='btn btn-warning' onclick='processImage("tree_enumeration")'>Tree Enumeration</button>
+                </div>
+
+                <script>
+                    let selectedPoints = [];
+
+                    function selectPath() {
+                        alert("Click two points on the image to calculate the optimal path.");
+
+                        let img = document.getElementById('capturedImage');
+                        img.addEventListener('click', function handleImageClick(event) {
+                            if (selectedPoints.length >= 2) return;
+
+                            const scaleX = img.naturalWidth / img.clientWidth;
+                            const scaleY = img.naturalHeight / img.clientHeight;
+                            const x = Math.round(event.offsetX * scaleX);
+                            const y = Math.round(event.offsetY * scaleY);
+                            selectedPoints.push([y, x]);  // Store as (row, col)
+
+                            // Add visual marker
+                            const marker = document.createElement('div');
+                            marker.className = 'marker';
+                            marker.style.position = 'absolute';
+                            marker.style.left = (event.offsetX - 5) + 'px';
+                            marker.style.top = (event.offsetY - 5) + 'px';
+                            img.parentNode.appendChild(marker);
+
+                            if (selectedPoints.length === 2) {
+                                setTimeout(() => {
+                                    alert("Processing optimal path...");
+                                    window.opener.postMessage({
+                                        option: "optimal_path",
+                                        start: selectedPoints[0],
+                                        goal: selectedPoints[1],
+                                        image: img.src
+                                    }, '*');
+                                    window.close();
+                                }, 1000);
+                            }
+                        });
+                    }
+
+                    function processImage(type) {
+                        let lat = 40.03883;  // Example latitude
+                        let lon = -75.59777; // Example longitude
+                        window.opener.postMessage({ option: type, image: '${imageData}', lat: lat, lon: lon }, '*');
+                        alert(type.charAt(0).toUpperCase() + type.slice(1) + ' processing...');
+                        window.close();
+                    }
+                <\/script>
+            </body>
+            </html>
+        `);
     });
 
+    // ✅ Handle Received Messages & Process Image
     window.addEventListener("message", function(event) {
         var data = event.data;
-        if(data.image && data.start && data.goal) {
+        console.log("Received message:", data);
+
+        if (data.image && data.option) {
             document.getElementById("loading").style.display = "flex";
             fetch("/process", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    image: data.image,
-                    start: data.start,
-                    goal: data.goal
-                })
+                body: JSON.stringify(data)
             })
             .then(response => response.json())
             .then(result => {
                 document.getElementById("loading").style.display = "none";
-                var resultWindow = window.open("", "Optimal Path", "width=800,height=600");
-                resultWindow.document.write("<html><head><title>Optimal Path</title>");
-                resultWindow.document.write("<link rel='stylesheet' href='https://maxcdn.bootstrapcdn.com/bootstrap/4.6.2/css/bootstrap.min.css'>");
-                resultWindow.document.write("</head><body class='p-3'>");
-                resultWindow.document.write("<h2>Total Cost: " + result.cost.toFixed(2) + "</h2>");
-                resultWindow.document.write("<img src='data:image/jpeg;base64," + result.result + "' class='img-fluid'/>");
-                resultWindow.document.write("</body></html>");
+
+                if (result.error) {
+                    alert("Error: " + result.error);
+                    return;
+                }
+
+                if (data.option === "land_cover") {
+                    // ✅ Display land cover percentages
+                    var resultWindow = window.open("", "Result", "width=800,height=600");
+                    resultWindow.document.write(`
+                        <html>
+                        <head>
+                            <title>Land Cover Percentages</title>
+                            <link rel='stylesheet' href='https://maxcdn.bootstrapcdn.com/bootstrap/4.6.2/css/bootstrap.min.css'>
+                        </head>
+                        <body class='p-3'>
+                            <h2>Land Cover Percentages</h2>
+                            <p>Forest: ${result.land_percentages.forest || "0"}%</p>
+                            <p>Water: ${result.land_percentages.water || "0"}%</p>
+                            <p>Agriculture: ${result.land_percentages.agriculture || "0"}%</p>
+                            <p>Urban: ${result.land_percentages.urban || "0"}%</p>
+                            <p>Barren Land: ${result.land_percentages.barren || "0"}%</p>
+                        </body>
+                        </html>
+                    `);
+                } else if (data.option === "optimal_path") {
+                    var resultWindow = window.open("", "Result", "width=800,height=600");
+                    resultWindow.document.write(`
+                        <html>
+                        <head>
+                            <title>Processing Result</title>
+                            <link rel='stylesheet' href='https://maxcdn.bootstrapcdn.com/bootstrap/4.6.2/css/bootstrap.min.css'>
+                        </head>
+                        <body class='p-3'>
+                            <h2>Processed Image</h2>
+                            <img src='data:image/jpeg;base64,${result.result}' class='img-fluid'/>
+                            <h4>Optimal Path Cost: ${result.optimal_cost}</h4>
+                            <h4>Straight Path Cost: ${result.straight_cost}</h4>
+                        </body>
+                        </html>
+                    `);
+                } else if (data.option === "tree_enumeration") {
+                    var resultWindow = window.open("", "Result", "width=800,height=600");
+                    resultWindow.document.write(`
+                        <html>
+                        <head>
+                            <title>Tree Enumeration</title>
+                            <link rel='stylesheet' href='https://maxcdn.bootstrapcdn.com/bootstrap/4.6.2/css/bootstrap.min.css'>
+                        </head>
+                        <body class='p-3'>
+                            <h2>Tree Enumeration</h2>
+                            <p>Tree Count: ${result.tree_count}</p>
+                            <img src='data:image/jpeg;base64,${result.result}' class='img-fluid'/>
+                        </body>
+                        </html>
+                    `);
+                } else {
+                    var resultWindow = window.open("", "Result", "width=800,height=600");
+                    resultWindow.document.write(`
+                        <html>
+                        <head>
+                            <title>Processing Result</title>
+                            <link rel='stylesheet' href='https://maxcdn.bootstrapcdn.com/bootstrap/4.6.2/css/bootstrap.min.css'>
+                        </head>
+                        <body class='p-3'>
+                            <h2>Processed Image</h2>
+                            <img src='data:image/jpeg;base64,${result.result}' class='img-fluid'/>
+                        </body>
+                        </html>
+                    `);
+                }
+            })
+            .catch(error => {
+                document.getElementById("loading").style.display = "none";
+                alert("Error: " + error);
             });
         }
     });
-</script>
+    // ✅ Fix for Cesium Search Bar Click Issues
+document.addEventListener("DOMContentLoaded", function () {
+    var viewer = new Cesium.Viewer('cesiumContainer', {
+        terrainProvider: Cesium.createWorldTerrain(),
+        geocoder: true,
+    });
+
+    // ✅ Allow clicks on UI elements (search bar & buttons)
+    var searchInput = document.querySelector(".cesium-geocoder-input");
+    var searchContainer = document.querySelector(".cesium-geocoder-container");
+
+    if (searchInput) {
+        // Ensure clicks don't get blocked by Cesium's camera control
+        searchContainer.style.pointerEvents = "auto";
+
+        searchInput.addEventListener("mousedown", function (event) {
+            viewer.scene.screenSpaceCameraController.enableInputs = false;  // Disable camera movement
+            event.stopPropagation();
+        });
+
+        searchInput.addEventListener("mouseup", function () {
+            setTimeout(() => {
+                viewer.scene.screenSpaceCameraController.enableInputs = true; // Re-enable camera after typing
+            }, 500); // Small delay for smooth interaction
+        });
+    }
+});
 
 
-
+  </script>
 </body>
 </html>
